@@ -3,64 +3,172 @@ import requests
 from collections import Counter
 from tqdm import tqdm
 import pickle
+import random
 
-def download_gutenberg_books(file_path, num_books=5, max_retries=3):
+def download_gutenberg_books(file_path, max_retries=3):
     """
     Downloads books from Project Gutenberg and saves them to individual files in a cache directory.
     """
-    # Create cache directory if it doesn't exist
     cache_dir = "cache"
     os.makedirs(cache_dir, exist_ok=True)
     
-    # Generate list of all book IDs up to max ID from popular books
-    max_book_id = 2701  # Max ID from original popular books list
-    popular_books = [(book_id, f"Book {book_id}") for book_id in range(1, max_book_id + 1)]
+    # Generate random sample of Gutenberg book IDs and create our own sequential IDs
+    max_gutenberg_id = 3500
+    num_books = 500
+    gutenberg_ids = set()
+    while len(gutenberg_ids) < num_books:
+        gutenberg_ids.add(random.randint(1, max_gutenberg_id))
+    gutenberg_ids = list(gutenberg_ids)
+
+
+    # Create a mapping dictionary to store sequential ID to Gutenberg ID mapping
+    id_mapping = {} 
     
-    books_to_download = popular_books[:num_books]
+    index_content = []  # New: Store index content in memory
+    successful_downloads = 0  # New: Track successful downloads
+
+    skip_book_if_contains = [
+        "<h1>Forbidden</h1>",
+        "<title>403 Forbidden</title>",
+        "This file is available in several formats, .avi, .mpeg as follows",
+        "The pages are contained within the accompanying .zip file."
+    ]
     
-    # Create index file to maintain compatibility
-    with open(file_path, "w", encoding="utf-8") as index_file:
-        print(f"\nStep 1/1: Downloading {num_books} books...")
-        for book_id, title in tqdm(books_to_download, desc="Books", unit="book"):
-            cache_path = os.path.join(cache_dir, f"book_{book_id}.txt")
-            
+    print(f"\nStep 1/1: Downloading {num_books} books...")
+    for gutenberg_id in tqdm(gutenberg_ids, desc="Books", unit="book"):
+        cache_path = os.path.join(cache_dir, f"book_{gutenberg_id}.txt")
+        
+        try:
             # Check if already cached
             if os.path.exists(cache_path):
                 with open(cache_path, "r", encoding="utf-8") as f:
                     text = f.read()
             else:
-                # Download from Project Gutenberg
-                url = f"https://www.gutenberg.org/files/{book_id}/{book_id}-0.txt"
-                try:
+                # Download from Project Gutenberg using gutenberg_id
+                url = f"https://www.gutenberg.org/files/{gutenberg_id}/{gutenberg_id}-0.txt" 
+                response = requests.get(url)
+                if response.status_code == 404:  # Try alternate URL format
+                    url = f"https://www.gutenberg.org/cache/epub/{gutenberg_id}/pg{gutenberg_id}.txt"
                     response = requests.get(url)
-                    if response.status_code == 404:  # Try alternate URL format
-                        url = f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
-                        response = requests.get(url)
-                    text = response.text
-                    
-                    # Basic header stripping (simplified version)
-                    start_marker = "*** START OF"
-                    end_marker = "*** END OF"
-                    if start_marker in text:
-                        text = text.split(start_marker)[1]
-                    if end_marker in text:
-                        text = text.split(end_marker)[0]
-                    text = text.strip()
-                    
-                    # Cache the book
-                    with open(cache_path, "w", encoding="utf-8") as f:
-                        f.write(text)
+                text = response.text
                 
-                except Exception as e:
-                    print(f"Failed to download book {book_id}: {str(e)}")
-                    continue
+                # Basic header stripping (simplified version)
+                start_marker = "*** START OF"
+                end_marker = "*** END OF"
+                if start_marker in text:
+                    text = text.split(start_marker)[1]
+                if end_marker in text:
+                    text = text.split(end_marker)[0]
+                text = text.strip()
+                text = '\n'.join(line for line in text.splitlines() if line.strip())
+                
+                # Cache the book
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+
+            # Only add to id_mapping and index_content if text is substantial enough
+            if len(text) >= 150 and not any(skip_word in text for skip_word in skip_book_if_contains):
+                our_id = successful_downloads  # Use successful_downloads instead of len(id_mapping)
+                id_mapping[our_id] = gutenberg_id
+                
+                # Move these lines INSIDE the if condition to ensure consistency
+                index_content.append(f"BOOK_ID={our_id}")
+                index_content.append(text)
+                successful_downloads += 1
+            else:
+                # Don't add anything to index_content if the book is invalid
+                # Still cache invalid books so they're skipped next time
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    f.write("")
+                continue  # Skip this book if text is too short
             
-            # Write to index file to maintain compatibility with process_data()
-            index_file.write(f"BOOK_ID={book_id}\n")
-            index_file.write(text + "\n")
+            
+        except Exception as e:
+            print(f"Failed to download book {gutenberg_id}: {str(e)}")
+            continue
     
-    print(f"\nComplete! Books saved to {cache_dir} and indexed in {file_path}")
+    # New: Write index file only after all downloads are complete
+    # New: Write index file only after all downloads are complete
+    index_file_path = file_path.replace(".", "_index.")
+    with open(index_file_path, "w", encoding="utf-8") as index_file:
+        index_file.write("\n".join([f"{our_id}={gutenberg_id}" for our_id, gutenberg_id in id_mapping.items()]))
+    
+    with open(file_path, "w", encoding="utf-8") as index_file:
+        index_file.write("\n".join(index_content))
+    
+    print(f"\nComplete! {successful_downloads} books saved to {cache_dir} and indexed in {file_path}")
     return file_path
+def get_book_title(gutenberg_id):
+    """
+    Retrieves the title of a book from Project Gutenberg using its ID.
+    
+    Args:
+        gutenberg_id (str): The Gutenberg ID of the book
+        
+    Returns:
+        str: The title of the book, or None if not found
+    """
+    try:
+        # Try the main URL format first
+        url = f"https://www.gutenberg.org/files/{gutenberg_id}/{gutenberg_id}-0.txt"
+        response = requests.get(url)
+        
+        # If 404, try alternate URL format
+        if response.status_code == 404:
+            url = f"https://www.gutenberg.org/cache/epub/{gutenberg_id}/pg{gutenberg_id}.txt"
+            response = requests.get(url)
+            
+        if response.status_code != 200:
+            return None
+            
+        text = response.text
+        
+        # Look for title in the header section
+        title = None
+        for line in text.splitlines()[:100]:  # Check first 100 lines
+            if "Title:" in line:
+                title = line.split("Title:")[1].strip()
+                break
+                
+        return title
+        
+    except Exception as e:
+        print(f"Error retrieving title for book {gutenberg_id}: {str(e)}")
+        return None
+
+def get_titles_for_ids(index_file_path, our_ids):
+    """
+    Gets titles for specified book IDs using the index file mapping.
+    
+    Args:
+        index_file_path (str): Path to the index file containing ID mappings
+        our_ids (list): List of our internal book IDs
+        
+    Returns:
+        list: List of titles in the same order as our_ids (None for any failures)
+    """
+    # Read the ID mapping from index file
+    id_to_gutenberg = {}
+    try:
+        with open(index_file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                our_id, gutenberg_id = line.strip().split("=")
+                id_to_gutenberg[int(our_id)] = gutenberg_id
+    except Exception as e:
+        print(f"Error reading index file: {str(e)}")
+        return [None] * len(our_ids)
+    
+    # Get titles for requested IDs
+    titles = []
+    for our_id in our_ids:
+        if our_id in id_to_gutenberg:
+            title = get_book_title(id_to_gutenberg[our_id])
+            titles.append(title)
+        else:
+            titles.append(None)
+            
+    return titles
+
 
 def get_data():
     """
@@ -76,42 +184,56 @@ def get_data():
     else:
         print(f"Dataset already exists at: {file_path}")
     return file_path
-
 def process_data(file_path, passage_length=50):
-    """
-    Processes the dataset into labeled passages of text.
-
-    Args:
-        file_path (str): Path to the raw dataset file.
-        passage_length (int): Number of words per passage.
-
-    Returns:
-        list: A list of (passage, label) tuples.
-    """
     passages = []
     current_label = None
 
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read().splitlines()
+    book_ids = [line.split('=')[1].strip() for line in content if line.startswith("BOOK_ID=")]
+    unique_book_ids = set(book_ids)
+    print(f"Unique book IDs found: {len(unique_book_ids)}")
 
+    # Track which books have passages
+    books_with_passages = set()
+    
     current_text = []
-    for line in content:
+    for line in tqdm(content, desc="Processing text", unit="line"):
         if line.startswith("BOOK_ID="):
-            # Save the previous book's passages
-            if current_text:
+            # Process previous book if it exists and has content
+            if current_text and current_label is not None:
                 text = " ".join(current_text)
                 words = text.split()
-                for i in range(0, len(words) - passage_length, passage_length):
-                    passage = " ".join(words[i:i + passage_length])
-                    passages.append((passage, current_label))
-            # Update the current label
+                if len(words) >= passage_length:  # Only process if enough words
+                    books_with_passages.add(current_label)
+                    # Only take first 50 passages per book
+                    for i in range(0, min(50 * passage_length, len(words) - passage_length), passage_length):
+                        passage = " ".join(words[i:i + passage_length])
+                        passages.append((passage, int(current_label)))
+                else:
+                    print(f"Skipping book with insufficient words: {current_label}")
+                    print(current_text)
             current_label = line.split("=")[1]
-            current_text = []  # Reset text for the new book
+            current_text = []
         else:
-            current_text.append(line)
+            # Skip empty lines and only add non-empty content
+            if line.strip():
+                current_text.append(line.strip())
+            
+    # Process the last book 
+    if current_text and current_label is not None:
+        text = " ".join(current_text)
+        words = text.split()
+        if len(words) >= passage_length:
+            books_with_passages.add(current_label)
+            for i in range(0, len(words) - passage_length, passage_length):
+                passage = " ".join(words[i:i + passage_length])
+                passages.append((passage, int(current_label)))
 
-    print(f"Processed dataset into {len(passages)} passages.")
+    processed_labels = set(label for _, label in passages)
+    print(f"Processed {len(passages)} passages with {len(processed_labels)} unique labels.")
     return passages
+
 
 def tokenize_and_build_vocab(dataset, pad_token="<PAD>", unk_token="<UNK>"):
     """
@@ -137,7 +259,7 @@ def tokenize_and_build_vocab(dataset, pad_token="<PAD>", unk_token="<UNK>"):
 
     # Map passages to token IDs
     tokenized_data = []
-    for passage, label in dataset:
+    for passage, label in tqdm(dataset, desc="Tokenizing passages", unit="passage"):
         tokenized_passage = [vocab.get(word, vocab[unk_token]) for word in passage.split()]
         tokenized_data.append((tokenized_passage, int(label)))
     

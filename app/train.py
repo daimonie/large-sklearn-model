@@ -1,11 +1,21 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from tqdm import tqdm
 from torch.utils.data import DataLoader
 from model import SmallTransformer  # Import your transformer model
 from dataset import create_dataset  # Import the dataset creation function
 
-def train(tokenized_data, vocab, num_epochs=10, batch_size=32, seq_length=50):
+def create_transformer(vocab, num_classes):
+    return SmallTransformer(
+        vocab_size=len(vocab),
+        num_classes=num_classes,
+        embed_dim=256,  # Larger embedding dimension
+        num_heads=8,    # More attention heads
+        num_layers=4    # More transformer layers
+    )
+
+def train(tokenized_data, vocab, num_epochs=30, batch_size=32, seq_length=50):
     """
     Trains the SmallTransformer model on the tokenized Gutenberg dataset.
     
@@ -25,21 +35,21 @@ def train(tokenized_data, vocab, num_epochs=10, batch_size=32, seq_length=50):
     print(f"Number of classes: {num_classes}")
     vocab_size = len(vocab)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = SmallTransformer(vocab_size, num_classes).to(device)
+    model = model = create_transformer(vocab, num_classes).to(device)
 
     # Define loss and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001 * batch_size / 32)
 
     for _, label in tokenized_data:
         assert 0 <= label < num_classes, f"Invalid label found: {label}"
 
     # Training loop
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs), desc="Training epochs", unit="epoch"):
         model.train()
         total_loss = 0
-        for batch_idx, (inputs, labels) in enumerate(dataloader):
-            print(f"Batch {batch_idx}: Labels: {labels}")
+        for batch_idx, (inputs, labels) in tqdm(enumerate(dataloader), desc=f"Epoch {epoch+1}", total=len(dataloader), unit="batch"):
+            # print(f"Batch {batch_idx}: Labels: {labels}")
             inputs, labels = inputs.to(device), labels.to(device) 
 
             # Forward pass
