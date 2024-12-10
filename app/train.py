@@ -3,19 +3,29 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from model import SmallTransformer  # Import your transformer model
+from model import SmallTransformer, CustomTransformer  # Import your transformer model
 from dataset import create_dataset  # Import the dataset creation function
 
-def create_transformer(vocab, num_classes):
-    return SmallTransformer(
-        vocab_size=len(vocab),
-        num_classes=num_classes,
-        embed_dim=256,  # Larger embedding dimension
-        num_heads=8,    # More attention heads
-        num_layers=4    # More transformer layers
-    )
+def create_transformer(vocab, num_classes, model_type="small_transformer"):
 
-def train(tokenized_data, vocab, num_epochs=30, batch_size=32, seq_length=50):
+    if model_type == "small_transformer":
+        return SmallTransformer(
+            vocab_size=len(vocab),
+            num_classes=num_classes,
+            embed_dim=256,  # Larger embedding dimension
+            num_heads=8,    # More attention heads
+            num_layers=4    # More transformer layers
+        )
+    elif model_type == "custom_transformer":
+        return CustomTransformer(
+            vocab_size=len(vocab),
+            num_classes=num_classes,
+            embed_dim=256,
+            num_heads=8,
+            num_layers=4
+        )
+
+def train(tokenized_data, vocab, num_epochs=30, batch_size=32, seq_length=50, model_type="small_transformer"):
     """
     Trains the SmallTransformer model on the tokenized Gutenberg dataset.
     
@@ -35,7 +45,7 @@ def train(tokenized_data, vocab, num_epochs=30, batch_size=32, seq_length=50):
     print(f"Number of classes: {num_classes}")
     vocab_size = len(vocab)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = model = create_transformer(vocab, num_classes).to(device)
+    model = model = create_transformer(vocab, num_classes, model_type=model_type).to(device)
 
     # Define loss and optimizer
     criterion = nn.CrossEntropyLoss()

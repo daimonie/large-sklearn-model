@@ -13,13 +13,16 @@ def download_gutenberg_books(file_path, max_retries=3):
     os.makedirs(cache_dir, exist_ok=True)
     
     # Generate random sample of Gutenberg book IDs and create our own sequential IDs
-    max_gutenberg_id = 3500
-    num_books = 500
-    gutenberg_ids = set()
-    while len(gutenberg_ids) < num_books:
-        gutenberg_ids.add(random.randint(1, max_gutenberg_id))
-    gutenberg_ids = list(gutenberg_ids)
+    max_gutenberg_id = 5000
+    num_books = 5000
 
+    gutenberg_ids = list(range(1, max_gutenberg_id + 1))
+    if num_books < max_gutenberg_id:
+        gutenberg_ids = set()
+        while len(gutenberg_ids) < num_books:
+            gutenberg_ids.add(random.randint(1, max_gutenberg_id))
+        gutenberg_ids = list(gutenberg_ids)
+    
 
     # Create a mapping dictionary to store sequential ID to Gutenberg ID mapping
     id_mapping = {} 
@@ -31,7 +34,9 @@ def download_gutenberg_books(file_path, max_retries=3):
         "<h1>Forbidden</h1>",
         "<title>403 Forbidden</title>",
         "This file is available in several formats, .avi, .mpeg as follows",
-        "The pages are contained within the accompanying .zip file."
+        "The pages are contained within the accompanying .zip file.",
+        "Please see the corresponding RTF file for this eBook.",
+        "THE PROJECT GUTENBERG EBOOK REPERTORY OF THE COMEDIE HUMAINE, PART 2 ***" # unsure why this book doesn't wokr
     ]
     
     print(f"\nStep 1/1: Downloading {num_books} books...")

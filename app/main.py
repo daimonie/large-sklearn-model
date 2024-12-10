@@ -4,7 +4,7 @@ import os
 import pickle
 from data import get_data, process_data, get_tokenized
 from train import train, create_transformer
-from model import SmallTransformer
+from model import SmallTransformer, CustomTransformer
 from data import get_titles_for_ids
 
 @click.group()
@@ -26,22 +26,24 @@ def preprocess():
     tokenized_data, vocabulary = get_tokenized(processed_data)
 
 @cli.command()
-def train():
+@click.option('--model-type', type=click.Choice(['small_transformer', 'custom_transformer']), default='small_transformer')
+def train(model_type):
     """Train the model"""
     file_path = get_data()  # Step 1: Get or download the dataset
     processed_data = process_data(file_path)  # Step 2: Process the data
     tokenized_data, vocab = get_tokenized(processed_data)  # Step 3: Tokenize the data
 
     # Step 4: Train the model
-    from train import train
-    model = train(tokenized_data, vocab)
-    torch.save(model.state_dict(), "small_transformer.pth")
-    print("Model trained and saved to small_transformer.pth")
+    model = train(tokenized_data, vocab, model_type=model_type)
+    torch.save(model.state_dict(), f"{model_type}.pth")
+    print(f"Model trained and saved to {model_type}.pth")
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 @cli.command()
-def predict():
+@click.option('--model-type', type=click.Choice(['small_transformer', 'custom_transformer']), default='small_transformer')
+def predict(model_type):
     """Make predictions with the trained model"""
 
     # Load the vocabulary and model
@@ -66,7 +68,8 @@ def predict():
 
 
     model = create_transformer(vocab, num_classes)
-    model.load_state_dict(torch.load("small_transformer.pth"))
+    print(f"Loading model from {model_type}.pth")
+    model.load_state_dict(torch.load(f"{model_type}.pth"))
     model.eval()
 
 

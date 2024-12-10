@@ -90,3 +90,114 @@ class SmallTransformer(nn.Module):
         pos_encoding[:, 1::2] = torch.cos(pos * angle_rates)  # Apply cosine to odd indices
 
         return pos_encoding
+
+class CustomTransformer(nn.Module):
+    """
+    A custom transformer-based model for text classification.
+    """
+    def __init__(self, vocab_size, num_classes, embed_dim=256, num_heads=8, num_layers=4, hidden_dim=512, max_len=5000, dropout=0.1):
+        super(CustomTransformer, self).__init__()
+        # Embedding layer with positional encoding
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.positional_encoding = PositionalEncoding(embed_dim, max_len)
+
+        # Stacking transformer encoder layers
+        self.layers = nn.ModuleList(
+            [TransformerEncoderLayer(embed_dim, num_heads, hidden_dim, dropout) for _ in range(num_layers)]
+        )
+
+        # Fully connected classification head
+        self.fc = nn.Linear(embed_dim, num_classes)
+
+    def forward(self, x, mask=None):
+        # Apply embeddings and positional encoding
+        x = self.embedding(x)
+        x = self.positional_encoding(x)
+
+        # Pass through transformer layers
+        for layer in self.layers:
+            x = layer(x, mask)
+
+        # Pooling for classification (mean pooling)
+        x = x.mean(dim=1)  # Aggregate token-level outputs
+
+        # Final classification
+        return self.fc(x)
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, embed_dim, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.encoding = torch.zeros(max_len, embed_dim)
+        position = torch.arange(0, max_len).unsqueeze(1).float()
+        div_term = torch.exp(torch.arange(0, embed_dim, 2).float() * (-math.log(10000.0) / embed_dim))
+        self.encoding[:, 0::2] = torch.sin(position * div_term)
+        self.encoding[:, 1::2] = torch.cos(position * div_term)
+        self.encoding = self.encoding.unsqueeze(0)
+
+    def forward(self, x):
+        return x + self.encoding[:, :x.size(1)].to(x.device)
+
+
+class TransformerEncoderLayer(nn.Module):
+    def __init__(self, embed_dim, num_heads, hidden_dim, dropout=0.1):
+        super(TransformerEncoderLayer, self).__init__()
+        self.attention = MultiHeadAttention(embed_dim, num_heads)
+        self.ffn = FeedForward(embed_dim, hidden_dim)
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, mask=None):
+        attn_output = self.attention(x, x, x, mask)
+        x = self.norm1(x + self.dropout(attn_output))
+        ffn_output = self.ffn(x)
+        x = self.norm2(x + self.dropout(ffn_output))
+        return x
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        super(MultiHeadAttention, self).__init__()
+        assert embed_dim % num_heads == 0, "Embedding size must be divisible by the number of heads."
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        self.query = nn.Linear(embed_dim, embed_dim)
+        self.key = nn.Linear(embed_dim, embed_dim)
+        self.value = nn.Linear(embed_dim, embed_dim)
+        self.out = nn.Linear(embed_dim, embed_dim)
+        self.attention = ScaledDotProductAttention()
+
+    def forward(self, Q, K, V, mask=None):
+        batch_size = Q.size(0)
+        Q = self.query(Q).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.key(K).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.value(V).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+
+        attn_output, attn_weights = self.attention(Q, K, V, mask)
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.head_dim)
+        return self.out(attn_output)
+
+
+class ScaledDotProductAttention(nn.Module):
+    def __init__(self):
+        super(ScaledDotProductAttention, self).__init__()
+
+    def forward(self, Q, K, V, mask=None):
+        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(Q.size(-1))
+        if mask is not None:
+            attn_scores = attn_scores.masked_fill(mask == 0, -1e9)
+        attn_weights = torch.softmax(attn_scores, dim=-1)
+        return torch.matmul(attn_weights, V), attn_weights
+
+
+class FeedForward(nn.Module):
+    def __init__(self, embed_dim, hidden_dim):
+        super(FeedForward, self).__init__()
+        self.linear1 = nn.Linear(embed_dim, hidden_dim)
+        self.relu = nn.ReLU()
+        self.linear2 = nn.Linear(hidden_dim, embed_dim)
+
+    def forward(self, x):
+        return self.linear2(self.relu(self.linear1(x)))
